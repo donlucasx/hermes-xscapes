@@ -1,0 +1,26 @@
+# Draft entry for NousResearch/hermes-agent plugin-catalog/xscapes.yaml.
+# Fill sha with the full 40-character commit of this repo once it is pushed.
+name: xscapes
+repo: https://github.com/donlucasx/hermes-xscapes
+sha: 0000000000000000000000000000000000000000
+subdir: ""
+title: xscapes
+description: 'A cozy ASCII scene under Hermes in the terminal that shows what the agent is doing while you
+  wait: the work is the weather, subagents arrive as small companions, the moon sinks as the context fills,
+  and the companion knocks with a sound when Hermes finishes or needs approval. Forwards twelve lifecycle
+  hooks to the xscapes CLI (`xscapes hook <event> hermes`, stdin JSON, never waited on, never blocks);
+  needs the xscapes binary. No tools, middleware or env vars; no network.'
+maintainer: donlucasx
+tier: community
+category: general
+requires_hermes: ">=0.23.0"
+docs_url: https://donlucasx.github.io/xscapes/
+version: "0.1.0"
+platforms: [linux, macos]
+capabilities:
+  provides_tools: []
+  provides_hooks: [on_session_start, on_session_reset, on_session_end, on_session_finalize, pre_llm_call,
+    post_llm_call, pre_tool_call, post_tool_call, pre_approval_request, post_approval_response,
+    subagent_start, subagent_stop]
+  provides_middleware: []
+  requires_env: []

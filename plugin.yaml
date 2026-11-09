@@ -1,0 +1,18 @@
+name: xscapes
+version: "0.1.0"
+description: "A cozy ASCII scene that shows what Hermes is doing while you wait: the work is the weather, subagents are kittens, the moon sinks as the context fills, and the companion knocks (with a sound) when Hermes finishes or needs you. Forwards Hermes's lifecycle hooks to the xscapes CLI; run Hermes inside it with `xscapes hermes`. Needs the xscapes binary (https://github.com/donlucasx/xscapes)."
+author: "donlucas"
+requires_hermes: ">=0.23.0"
+provides_hooks:
+  - on_session_start
+  - on_session_reset
+  - on_session_end
+  - on_session_finalize
+  - pre_llm_call
+  - post_llm_call
+  - pre_tool_call
+  - post_tool_call
+  - pre_approval_request
+  - post_approval_response
+  - subagent_start
+  - subagent_stop
