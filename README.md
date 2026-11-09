@@ -12,11 +12,9 @@ This plugin forwards Hermes's lifecycle hooks to the xscapes program, which draw
 
 ## Install
 
-1. Install xscapes (macOS and Linux):
-
-   ```
-   curl -fsSL https://donlucasx.github.io/xscapes/install.sh | sh
-   ```
+1. Install xscapes (macOS and Linux) with the one-line installer on
+   https://donlucasx.github.io/xscapes/, or download a binary from
+   https://github.com/donlucasx/xscapes/releases/latest and put it on your PATH.
 
 2. Install the plugin:
 
