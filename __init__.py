@@ -40,7 +40,37 @@ EVENTS = (
     "post_approval_response",
     "subagent_start",
     "subagent_stop",
+    # Hermes waits on the person (a clarify question, a password prompt, an
+    # approval) and when that wait ends: the ask balloon and its sound.
+    "on_human_input_request",
+    "on_human_input_resolved",
+    # After each model call: the context in use and the window (the moon),
+    # and the tokens the call processed (the running count).
+    "post_api_request",
 )
+
+# post_api_request also carries the model's response and message; the scene
+# needs only these, so nothing else leaves the process.
+_API_FIELDS = ("session_id", "model", "provider", "usage", "context_length")
+
+_totals_lock = threading.Lock()
+_totals: dict[str, int] = {}
+
+
+def slim_api_request(kwargs: dict[str, Any]) -> dict[str, Any]:
+    """The few post_api_request fields xscapes reads, plus the session's
+    running token total (Hermes reports each call on its own)."""
+    out = {k: kwargs.get(k) for k in _API_FIELDS if k in kwargs}
+    usage = kwargs.get("usage") if isinstance(kwargs.get("usage"), dict) else {}
+    try:
+        n = int(usage.get("total_tokens") or 0)
+    except (TypeError, ValueError):
+        n = 0
+    sid = str(kwargs.get("session_id") or "")
+    with _totals_lock:
+        _totals[sid] = _totals.get(sid, 0) + max(n, 0)
+        out["xscapes_total"] = _totals[sid]
+    return out
 
 # kwargs that the shell-hook wire puts at the top level; everything else
 # goes under "extra".
@@ -122,6 +152,8 @@ def send(event: str, kwargs: dict[str, Any]) -> None:
 
 def _hook(event: str) -> Callable[..., None]:
     def callback(**kwargs: Any) -> None:
+        if event == "post_api_request":
+            kwargs = slim_api_request(kwargs)
         send(event, kwargs)
         return None
 

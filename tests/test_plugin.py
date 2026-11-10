@@ -117,3 +117,33 @@ def test_no_binary_is_a_quiet_no_op(tmp_path, monkeypatch):
     mod = load()
     mod.send("pre_llm_call", {"user_message": "x"})  # must not raise
     assert mod.find_xscapes() is None
+
+
+def test_a_model_call_sends_only_usage_and_a_running_total(fake_xscapes):
+    """post_api_request carries the response and the assistant message; only
+    the usage, the window and the session's running total leave the process."""
+    mod = load()
+    ctx = Ctx()
+    mod.register(ctx)
+    for n in (1000, 2500):
+        ctx.hooks["post_api_request"][0](session_id="s3", model="m", provider="p", context_length=200000,
+                                         usage={"prompt_tokens": n - 100, "total_tokens": n},
+                                         response={"text": "SECRET-RESPONSE"}, assistant_message="SECRET-MESSAGE")
+    calls = wait_calls(fake_xscapes, 2)
+    got = sorted((json.loads(f.read_text()) for f in calls), key=lambda g: g["extra"]["xscapes_total"])
+    assert [g["extra"]["xscapes_total"] for g in got] == [1000, 3500]
+    assert got[1]["extra"]["context_length"] == 200000
+    assert got[1]["extra"]["usage"]["prompt_tokens"] == 2400
+    for f in calls:
+        assert "SECRET" not in f.read_text()
+
+
+def test_a_question_reaches_xscapes(fake_xscapes):
+    mod = load()
+    ctx = Ctx()
+    mod.register(ctx)
+    ctx.hooks["on_human_input_request"][0](kind="clarify", request_id="r1", session_id="s4", prompt="[redacted]")
+    (f,) = wait_calls(fake_xscapes, 1)
+    got = json.loads(f.read_text())
+    assert got["hook_event_name"] == "on_human_input_request"
+    assert got["extra"]["kind"] == "clarify"
