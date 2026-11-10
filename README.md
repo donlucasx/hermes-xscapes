@@ -15,12 +15,15 @@ This plugin forwards Hermes's lifecycle hooks to the xscapes program, which draw
 1. Install xscapes (macOS and Linux) with the one-line installer on
    https://donlucasx.github.io/xscapes/, or download a binary from
    https://github.com/donlucasx/xscapes/releases/latest and put it on your PATH.
+   This plugin needs xscapes 0.5.1 or later.
 
 2. Install the plugin:
 
    ```
-   hermes plugins install xscapes
+   hermes plugins install donlucasx/hermes-xscapes --enable
    ```
+
+   (Once the plugin is listed in the Hermes catalog, `hermes plugins install xscapes` works too.)
 
 3. Run Hermes inside the scene:
 
@@ -37,6 +40,7 @@ If you set up xscapes before with `xscapes install hermes`, those shell hooks an
 - **Runs a program.** On each hook it starts `xscapes hook <event> hermes` and writes the event to its stdin as JSON (the same fields Hermes's own shell hooks send). It does not wait for the program, and it never blocks, edits or approves anything.
 - **Finds the program** in `XSCAPES_BIN`, then on `PATH`, then at `~/.local/bin/xscapes`. Without it, every hook does nothing and one warning is logged.
 - **Reads one file outside its own folder:** Hermes's `config.yaml`, only to check for the old xscapes shell hooks and warn about double events.
+- **Keeps model calls to their numbers.** After each model call it passes on only the token usage, the model's name and the context window size, never the response or the message, plus its own running token total for the session.
 - **Sends nothing over the network.** xscapes keeps the events in `~/.config/xscapes/` on your machine.
 
 What xscapes sees: the event name, the tool name and its arguments, your prompt's first line and the reply's first line, durations, and the session id. It uses them to draw the scene and the activity line under it.
