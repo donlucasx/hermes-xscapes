@@ -68,10 +68,16 @@ warning when it finds both).
   only the token usage, the model's name and the context window size, never
   the response or the message, plus its own running token total for the
   session.
+- **Keeps the conversation in Hermes.** From each turn it sends only the
+  first line of your prompt and of the reply, cut to 120 characters, never
+  the conversation history.
+- **Gives xscapes a minimal environment:** `PATH`, `HOME`, `LANG`, `LC_ALL`,
+  `TERM`, `XDG_CONFIG_HOME`, `TMPDIR` and xscapes's own `XSCAPES_*` settings.
+  Your provider keys and the rest of Hermes's environment never reach it.
 - **Sends nothing over the network.** xscapes keeps events in
   `~/.config/xscapes/` on your machine.
 
-xscapes sees the event name, the tool name and its arguments, the first line
+xscapes sees the event name, the tool name and its arguments, that first line
 of your prompt and of the reply, durations, and the session id, and uses them
 to draw the scene and its activity line.
 

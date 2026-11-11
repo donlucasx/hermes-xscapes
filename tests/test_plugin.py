@@ -69,7 +69,7 @@ def test_a_tool_call_reaches_xscapes_as_the_shell_hook_wire(fake_xscapes):
     ctx = Ctx()
     mod.register(ctx)
     ret = ctx.hooks["pre_tool_call"][0](tool_name="terminal", args={"command": "go test ./..."},
-                                        session_id="s1", task_id="t9")
+                                        session_id="s1", task_id="t9", tool_call_id="c1")
     assert ret is None  # never blocks
     (f,) = wait_calls(fake_xscapes, 1)
     got = json.loads(f.read_text())
@@ -77,14 +77,14 @@ def test_a_tool_call_reaches_xscapes_as_the_shell_hook_wire(fake_xscapes):
     assert got["tool_name"] == "terminal"
     assert got["tool_input"] == {"command": "go test ./..."}
     assert got["session_id"] == "s1"
-    assert got["extra"] == {"task_id": "t9"}
+    assert got["extra"] == {"tool_call_id": "c1"}  # task_id: not read, not sent
     assert f.with_suffix(".argv").read_text().split() == ["hook", "pre_tool_call", "hermes"]
 
 
 def test_the_wire_matches_hermess_own_shell_hooks():
     """The same keyword payload, serialised by Hermes's shell-hook code and by
-    the plugin, gives the same fields (Hermes adds profile and kanban_task_id,
-    which xscapes does not read)."""
+    the plugin, gives the same fields for everything xscapes reads (Hermes
+    adds profile, and extras the plugin keeps back)."""
     try:
         from agent import shell_hooks
     except Exception:
@@ -95,7 +95,7 @@ def test_the_wire_matches_hermess_own_shell_hooks():
     theirs = json.loads(shell_hooks._serialize_payload("post_tool_call", kw))
     ours = json.loads(mod.payload("post_tool_call", kw))
     theirs.pop("profile", None)
-    theirs["extra"].pop("kanban_task_id", None)
+    theirs["extra"] = {k: v for k, v in theirs["extra"].items() if k in mod._EXTRA_FIELDS}
     assert ours == theirs
 
 
@@ -147,3 +147,47 @@ def test_a_question_reaches_xscapes(fake_xscapes):
     got = json.loads(f.read_text())
     assert got["hook_event_name"] == "on_human_input_request"
     assert got["extra"]["kind"] == "clarify"
+
+
+def test_a_turn_sends_one_line_never_the_conversation(fake_xscapes):
+    """pre_llm_call and post_llm_call carry the whole conversation; only the
+    first line of the prompt and of the reply (120 characters at most) leave."""
+    mod = load()
+    ctx = Ctx()
+    mod.register(ctx)
+    history = [{"role": "user", "content": "SECRET-HISTORY"}]
+    ctx.hooks["pre_llm_call"][0](session_id="s5", user_message="fix the tests\nSECRET-SECOND-LINE",
+                                 conversation_history=history, model="m", platform="cli")
+    ctx.hooks["post_llm_call"][0](session_id="s5", assistant_response="x" * 300 + "\nSECRET-REST",
+                                  user_message="fix the tests", conversation_history=history)
+    calls = wait_calls(fake_xscapes, 2)
+    got = {json.loads(f.read_text())["hook_event_name"]: json.loads(f.read_text()) for f in calls}
+    assert got["pre_llm_call"]["extra"] == {"user_message": "fix the tests", "model": "m"}
+    reply = got["post_llm_call"]["extra"]["assistant_response"]
+    assert len(reply) == 120 and reply.endswith("\u2026")
+    assert "conversation_history" not in got["post_llm_call"]["extra"]
+    for f in calls:
+        assert "SECRET" not in f.read_text()
+
+
+def test_the_child_gets_a_minimal_environment(tmp_path, monkeypatch):
+    """Hermes's provider keys never reach the xscapes process."""
+    out = tmp_path / "env.txt"
+    exe = tmp_path / "xscapes"
+    exe.write_text(f'#!/bin/sh\nenv > "{out}.tmp" && mv "{out}.tmp" "{out}"\ncat > /dev/null\n')
+    exe.chmod(0o755)
+    monkeypatch.setenv("XSCAPES_BIN", str(exe))
+    monkeypatch.setenv("XSCAPES_HOME", "/tmp/xs-home")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "SECRET-KEY")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "SECRET-KEY")
+    mod = load()
+    mod.send("pre_tool_call", {"tool_name": "terminal", "session_id": "s6"})
+    end = time.time() + 5
+    while not out.exists() and time.time() < end:
+        time.sleep(0.05)
+    env = dict(l.split("=", 1) for l in out.read_text().splitlines() if "=" in l)
+    assert "SECRET-KEY" not in out.read_text()
+    assert env.get("XSCAPES_HOME") == "/tmp/xs-home"
+    assert env.get("PATH") == os.environ["PATH"]
+    allowed = set(mod._ENV_KEYS) | {"PWD", "SHLVL", "_", "OLDPWD"}
+    assert {k for k in env if not k.startswith("XSCAPES_")} <= allowed

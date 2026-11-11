@@ -1,9 +1,11 @@
 """xscapes for Hermes: the agent's lifecycle, forwarded to the xscapes scene.
 
 Every hook below hands the event to ``xscapes hook <event> hermes`` on stdin,
-as the same JSON Hermes's own shell hooks send (``hook_event_name``,
-``tool_name``, ``tool_input``, ``session_id``, ``cwd``, ``extra``), so the
-xscapes side reads a plugin and a shell hook alike. Nothing is returned:
+in the shell-hook wire format (``hook_event_name``, ``tool_name``,
+``tool_input``, ``session_id``, ``cwd``, ``extra``), so the xscapes side
+reads a plugin and a shell hook alike. ``extra`` carries only the fields the
+scene reads, the prompt and reply cut to one line, and the child gets a
+minimal environment. Nothing is returned:
 the plugin never blocks, edits or approves anything. The child is started
 and left to finish on its own (``xscapes hook`` exits within a quarter of a
 second whatever happens), so a hook never waits on it.
@@ -72,9 +74,42 @@ def slim_api_request(kwargs: dict[str, Any]) -> dict[str, Any]:
         out["xscapes_total"] = _totals[sid]
     return out
 
-# kwargs that the shell-hook wire puts at the top level; everything else
-# goes under "extra".
+# kwargs that the shell-hook wire puts at the top level.
 _TOP_LEVEL = {"tool_name", "args", "session_id", "parent_session_id"}
+
+# The only other kwargs that leave the process, under "extra": the fields the
+# xscapes binary reads (hermesExtra in xscapes's hook.go). Anything else a
+# hook carries, conversation_history included, stays in Hermes.
+_EXTRA_FIELDS = frozenset({
+    "user_message", "assistant_response",  # cut to one line, see _first_line
+    "duration_ms", "child_role", "child_status", "child_session_id",
+    "child_subagent_id", "command", "reason", "kind", "tool_call_id", "outcome",
+    # post_api_request, after slim_api_request
+    "model", "provider", "usage", "context_length", "xscapes_total",
+})
+
+# The prompt and the reply: the scene shows one line of each, at most 120
+# characters (the same cut the binary makes), so that is all that is sent.
+_LINE_FIELDS = ("user_message", "assistant_response")
+_LINE_MAX = 120
+
+# The child's environment: what it needs to find its home and socket, and
+# xscapes's own XSCAPES_* settings. Nothing else of Hermes's environment
+# (provider keys included) reaches it.
+_ENV_KEYS = ("PATH", "HOME", "LANG", "LC_ALL", "TERM", "XDG_CONFIG_HOME", "TMPDIR")
+
+
+def _first_line(v: Any) -> str:
+    s = str(v or "").strip()
+    for sep in ("\r", "\n"):
+        s = s.split(sep, 1)[0]
+    return s if len(s) <= _LINE_MAX else s[:_LINE_MAX - 1] + "\u2026"
+
+
+def child_env() -> dict[str, str]:
+    env = {k: os.environ[k] for k in _ENV_KEYS if k in os.environ}
+    env.update({k: v for k, v in os.environ.items() if k.startswith("XSCAPES_")})
+    return env
 
 _bin_lock = threading.Lock()
 _bin: Optional[str] = None
@@ -114,7 +149,8 @@ def payload(event: str, kwargs: dict[str, Any]) -> str:
         "tool_input": args if isinstance(args, dict) else None,
         "session_id": kwargs.get("session_id") or kwargs.get("parent_session_id") or "",
         "cwd": cwd,
-        "extra": {k: v for k, v in kwargs.items() if k not in _TOP_LEVEL},
+        "extra": {k: (_first_line(v) if k in _LINE_FIELDS else v)
+                  for k, v in kwargs.items() if k in _EXTRA_FIELDS},
     }, ensure_ascii=False, default=str)
 
 
@@ -138,7 +174,7 @@ def send(event: str, kwargs: dict[str, Any]) -> None:
         proc = subprocess.Popen(
             [exe, "hook", event, "hermes"],
             stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-            start_new_session=True, close_fds=True,
+            start_new_session=True, close_fds=True, env=child_env(),
         )
         try:
             proc.stdin.write(data)
@@ -164,7 +200,11 @@ def _hook(event: str) -> Callable[..., None]:
 def shell_hooks_installed() -> bool:
     """Whether `xscapes install hermes` wrote its shell hooks into Hermes's
     config too: then every event would reach the scene twice."""
-    home = Path(os.environ.get("HERMES_HOME") or Path.home() / ".hermes")
+    try:
+        from hermes_constants import get_hermes_home
+        home = Path(get_hermes_home())
+    except Exception:  # outside Hermes (tests): the documented default
+        home = Path(os.environ.get("HERMES_HOME") or Path.home() / ".hermes")
     try:
         return "# xscapes:v1" in (home / "config.yaml").read_text(errors="ignore")
     except OSError:
